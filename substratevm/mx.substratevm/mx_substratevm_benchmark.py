@@ -185,7 +185,8 @@ class RenaissanceNativeImageBenchmarkSuite(mx_sdk_benchmark.RenaissanceBenchmark
         return None
 
     def renaissance_unpacked(self):
-        return extract_archive(self.renaissancePath(), 'renaissance.extracted')
+        # The standalone jars are unaffected by the Renaissance launcher's URL scheme, so always use the pinned jar.
+        return extract_archive(self.renaissanceLibraryPath(), 'renaissance.extracted')
 
     def standalone_jar_path(self, benchmark_name):
         standalone_jars_directory = "single"

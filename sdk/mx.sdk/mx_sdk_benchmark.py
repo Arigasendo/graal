@@ -41,6 +41,7 @@
 
 from __future__ import annotations
 
+import atexit
 import collections.abc
 import os
 import os.path
@@ -4074,6 +4075,63 @@ _renaissanceConfig = {
 }
 
 
+_RENAISSANCE_SCHEME = b'resource'
+_RENAISSANCE_NEW_SCHEME = b'renaisrc'
+_RENAISSANCE_EXPECTED_PATCHES = 6
+# Size of each constant-pool entry (excluding the one-byte tag) for all tags except Utf8.
+_CONSTANT_POOL_ENTRY_SIZES = {3: 4, 4: 4, 5: 8, 6: 8, 7: 2, 8: 2, 9: 4, 10: 4, 11: 4, 12: 4, 15: 3, 16: 2, 17: 4, 18: 4, 19: 2, 20: 2}
+
+
+def _rename_renaissance_resource_scheme(src, dst):
+    """
+    Writes a copy of the Renaissance jar `src` to `dst` in which the URL scheme "resource" that the
+    Renaissance launcher registers for its jar-in-jar loading is renamed to a same-length name.
+
+    Native Image's run-time class loading reserves "resource:" for its own URLs and never asks a
+    user-installed URLStreamHandlerFactory for that scheme, so Renaissance's inner-jar URLs are rejected.
+    Only exact constant-pool strings ("resource" and "resource:/...") in org/renaissance/core classes are
+    rewritten, which keeps the class files valid. Aborts if the number of rewritten strings is unexpected,
+    e.g. because the Renaissance version changed.
+    """
+    def patch_class(name, data):
+        if data[:4] != b'\xca\xfe\xba\xbe':
+            mx.abort(f"{name} in {src} is not a class file")
+        b = bytearray(data)
+        count = int.from_bytes(b[8:10], 'big')
+        i, k, patched = 10, 1, 0
+        while k < count:
+            tag = b[i]
+            if tag == 1:  # Utf8
+                length = int.from_bytes(b[i + 1:i + 3], 'big')
+                value = bytes(b[i + 3:i + 3 + length])
+                if value == _RENAISSANCE_SCHEME or value.startswith(_RENAISSANCE_SCHEME + b':/'):
+                    b[i + 3:i + 3 + len(_RENAISSANCE_SCHEME)] = _RENAISSANCE_NEW_SCHEME
+                    patched += 1
+                i += 3 + length
+            else:
+                size = _CONSTANT_POOL_ENTRY_SIZES.get(tag)
+                if size is None:
+                    mx.abort(f"Unknown constant pool tag {tag} in {name} in {src}")
+                i += 1 + size
+                if tag in (5, 6):  # long and double take two constant-pool slots
+                    k += 1
+            k += 1
+        return bytes(b), patched
+
+    total = 0
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, 'w') as zout:
+        for info in zin.infolist():
+            data = zin.read(info)
+            if info.filename.startswith('org/renaissance/core/') and info.filename.endswith('.class'):
+                data, patched = patch_class(info.filename, data)
+                total += patched
+            # The inner jars are already compressed, so deflating them again is slow and saves almost nothing.
+            compress_type = zipfile.ZIP_STORED if info.filename.endswith('.jar') else info.compress_type
+            zout.writestr(info, data, compress_type=compress_type)
+    if total != _RENAISSANCE_EXPECTED_PATCHES:
+        mx.abort(f"Expected to rename {_RENAISSANCE_EXPECTED_PATCHES} 'resource' constants in {src}, but renamed {total}. Did the Renaissance version change?")
+
+
 class RenaissanceBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.AveragingBenchmarkMixin, mx_benchmark.TemporaryWorkdirMixin):
     """Renaissance benchmark suite implementation.
     """
@@ -4144,11 +4202,37 @@ class RenaissanceBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.Av
     def availableSuiteVersions(self):
         return ["0.14.1", "0.15.0", "0.16.0", "0.16.1"]
 
-    def renaissancePath(self):
+    def renaissanceLibraryPath(self):
+        """
+        Returns the path of the pinned Renaissance jar. mx downloads it if needed and validates it against
+        the digest pinned in the suite.
+        """
         lib = mx.library(self.renaissanceLibraryName())
-        if lib:
-            return lib.get_path(True)
-        return None
+        return lib.get_path(True) if lib else None
+
+    def renaissancePath(self):
+        path = self.renaissanceLibraryPath()
+        if path and mx.get_env('RENAISSANCE_PATCH_RESOURCE_SCHEME') in ('1', 'true'):
+            return self._patchedRenaissancePath(path)
+        return path
+
+    def _patchedRenaissancePath(self, validated_path):
+        """
+        Returns a copy of the (already validated) Renaissance jar in which the private URL scheme
+        "resource" is renamed, see `_rename_renaissance_resource_scheme`. The copy is created once per
+        mx process in a private temporary directory that is removed at exit, so it is always derived from
+        the jar that was just validated and concurrent mx processes cannot interfere.
+        """
+        cached = getattr(self, '_patched_renaissance', None)
+        if cached is None or cached[0] != validated_path:
+            tmp_dir = tempfile.mkdtemp(prefix='renaissance-patched-')
+            atexit.register(shutil.rmtree, tmp_dir, ignore_errors=True)
+            patched_path = os.path.join(tmp_dir, os.path.basename(validated_path))
+            _rename_renaissance_resource_scheme(validated_path, patched_path)
+            mx.warn(f"Using a copy of {validated_path} with the 'resource' URL scheme renamed (RENAISSANCE_PATCH_RESOURCE_SCHEME): {patched_path}")
+            cached = (validated_path, patched_path)
+            self._patched_renaissance = cached
+        return cached[1]
 
     def postprocessRunArgs(self, benchname, runArgs):
         parser = argparse.ArgumentParser(add_help=False)
