@@ -2608,6 +2608,8 @@ class BaseDaCapoBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.Ave
         else:
             iterations = self.daCapoIterations()[benchname]
             if iterations == -1:
+                if _include_unsupported_benchmarks():
+                    mx.abort(f"DaCapo '{benchname}' has no default iteration count, pass one explicitly (for example '-n 2') when INCLUDE_UNSUPPORTED_BENCHMARKS is set")
                 return None
             else:
                 iterations = iterations + int(self.getExtraIterationCount(iterations) * args.sf)
@@ -2653,8 +2655,10 @@ class BaseDaCapoBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.Ave
         missing_sizes = set(self.daCapoIterations().keys()).difference(set(self.daCapoSizes().keys()))
         if len(missing_sizes) > 0:
             mx.abort(f"Missing size definitions for benchmark(s): {missing_sizes}")
+        if _include_unsupported_benchmarks():
+            mx.warn("INCLUDE_UNSUPPORTED_BENCHMARKS is set: listing DaCapo benchmarks that have no default iteration count")
         return [b for b, it in self.daCapoIterations().items()
-                if self.workloadSize() in self.daCapoSizes().get(b, []) and it != -1]
+                if self.workloadSize() in self.daCapoSizes().get(b, []) and (it != -1 or _include_unsupported_benchmarks())]
 
     def successPatterns(self):
         return [
@@ -2726,6 +2730,17 @@ class BaseDaCapoBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.Ave
         results = super().run(benchmarks, bmSuiteArgs)
         self.addAverageAcrossLatestResults(results)
         return results
+
+
+def _include_unsupported_benchmarks():
+    """
+    Opt-in (INCLUDE_UNSUPPORTED_BENCHMARKS=1) for running benchmarks that the suites exclude by default:
+    Renaissance benchmarks removed per version in ``renaissanceIterations`` and DaCapo benchmarks whose default
+    iteration count is -1. The exclusions were not written for Crema, so this allows checking whether they also fail
+    there. DaCapo benchmarks removed per JDK or version in ``daCapoIterations`` (batik, avrora, tradesoap and the
+    9.12-bach set) stay excluded. DaCapo benchmarks with a -1 count need an explicit iteration count (-n).
+    """
+    return mx.get_env('INCLUDE_UNSUPPORTED_BENCHMARKS') in ('1', 'true')
 
 
 _daCapoIterations = {
@@ -4151,6 +4166,10 @@ class RenaissanceBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.Av
         benchmarks = _renaissanceConfig.copy()
         version = self.version()
 
+        if _include_unsupported_benchmarks():
+            mx.warn("INCLUDE_UNSUPPORTED_BENCHMARKS is set: not applying the per-version Renaissance exclusions")
+            return benchmarks
+
         if version in ["0.14.1"]:
             if mx.get_jdk().javaCompliance >= '21':
                 del benchmarks["als"]
@@ -4285,7 +4304,7 @@ class RenaissanceBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.Av
         return (vmArgs + ["-jar", self.renaissancePath()] + runArgs + [benchArg])
 
     def benchmarkList(self, bmSuiteArgs):
-        return [b for b, it in self.renaissanceIterations().items() if it != -1]
+        return [b for b, it in self.renaissanceIterations().items() if it != -1 or _include_unsupported_benchmarks()]
 
     def successPatterns(self):
         return []
