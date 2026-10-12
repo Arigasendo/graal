@@ -125,16 +125,30 @@ public class RuntimeCodeInfoMemory {
         peakNativeMetadataSize = Word.zero();
     }
 
+    /**
+     * Brings the counters in line with the current sizes of the code info. The sizes of a
+     * runtime-compiled code info are not final when it is added (the code and data sizes are set
+     * during the installation and the metadata arrays are created even later), so the counters
+     * contain exactly the sizes that were last recorded in the code info and this method replaces
+     * them with the current ones.
+     */
     @Uninterruptible(reason = "Manipulate the counters atomically with regard to GC.")
-    private void addToSizeCounters(CodeInfo codeInfo) {
+    private void recountSizes(CodeInfo codeInfo) {
         // must be done under this.lock
         UnsignedWord code = CodeInfoAccess.getCodeSize(codeInfo);
         UnsignedWord codeAndDataMemory = CodeInfoAccess.getCodeAndDataMemorySize(codeInfo);
         UnsignedWord nativeMetadata = CodeInfoAccess.getNativeMetadataSize(codeInfo);
-        codeSize = codeSize.add(code);
-        codeAndDataMemorySize = codeAndDataMemorySize.add(codeAndDataMemory);
-        nativeMetadataSize = nativeMetadataSize.add(nativeMetadata);
-        totalSize = totalSize.add(codeAndDataMemory).add(nativeMetadata);
+        UnsignedWord accountedCode = RuntimeCodeInfoAccess.getAccountedCodeSize(codeInfo);
+        UnsignedWord accountedCodeAndDataMemory = RuntimeCodeInfoAccess.getAccountedCodeAndDataMemorySize(codeInfo);
+        UnsignedWord accountedNativeMetadata = RuntimeCodeInfoAccess.getAccountedNativeMetadataSize(codeInfo);
+
+        /* Subtract first so that the intermediate values never wrap, the new sizes may be smaller. */
+        codeSize = codeSize.subtract(accountedCode).add(code);
+        codeAndDataMemorySize = codeAndDataMemorySize.subtract(accountedCodeAndDataMemory).add(codeAndDataMemory);
+        nativeMetadataSize = nativeMetadataSize.subtract(accountedNativeMetadata).add(nativeMetadata);
+        totalSize = totalSize.subtract(accountedCodeAndDataMemory).subtract(accountedNativeMetadata).add(codeAndDataMemory).add(nativeMetadata);
+        RuntimeCodeInfoAccess.setAccountedSizes(codeInfo, code, codeAndDataMemory, nativeMetadata);
+
         if (codeSize.aboveThan(peakCodeSize)) {
             peakCodeSize = codeSize;
         }
@@ -151,20 +165,35 @@ public class RuntimeCodeInfoMemory {
 
     @Uninterruptible(reason = "Manipulate the counters atomically with regard to GC.")
     private void subtractToSizeCounters(CodeInfo codeInfo) {
-        // This is done when the code info is removed the table
-        // code and data might actually have been released earlier in
-        // RuntimeCodeInfoAccess.freePartially
-        UnsignedWord code = CodeInfoAccess.getCodeSize(codeInfo);
-        UnsignedWord codeAndDataMemory = CodeInfoAccess.getCodeAndDataMemorySize(codeInfo);
-        UnsignedWord nativeMetadata = CodeInfoAccess.getNativeMetadataSize(codeInfo);
-        codeSize = codeSize.subtract(code);
-        codeAndDataMemorySize = codeAndDataMemorySize.subtract(codeAndDataMemory);
-        nativeMetadataSize = nativeMetadataSize.subtract(nativeMetadata);
-        totalSize = totalSize.subtract(codeAndDataMemory).subtract(nativeMetadata);
-        assert codeSize.aboveOrEqual(0);
-        assert codeAndDataMemorySize.aboveOrEqual(0);
-        assert nativeMetadataSize.aboveOrEqual(0);
-        assert totalSize.aboveOrEqual(0);
+        // This is done when the code info is removed from the table. Subtract the recorded sizes,
+        // not the current ones, so that exactly what was added is removed again.
+        UnsignedWord accountedCode = RuntimeCodeInfoAccess.getAccountedCodeSize(codeInfo);
+        UnsignedWord accountedCodeAndDataMemory = RuntimeCodeInfoAccess.getAccountedCodeAndDataMemorySize(codeInfo);
+        UnsignedWord accountedNativeMetadata = RuntimeCodeInfoAccess.getAccountedNativeMetadataSize(codeInfo);
+        assert codeSize.aboveOrEqual(accountedCode);
+        assert codeAndDataMemorySize.aboveOrEqual(accountedCodeAndDataMemory);
+        assert nativeMetadataSize.aboveOrEqual(accountedNativeMetadata);
+        assert totalSize.aboveOrEqual(accountedCodeAndDataMemory.add(accountedNativeMetadata));
+        codeSize = codeSize.subtract(accountedCode);
+        codeAndDataMemorySize = codeAndDataMemorySize.subtract(accountedCodeAndDataMemory);
+        nativeMetadataSize = nativeMetadataSize.subtract(accountedNativeMetadata);
+        totalSize = totalSize.subtract(accountedCodeAndDataMemory).subtract(accountedNativeMetadata);
+        /* The code info can be added again (client isolate), so it must not be counted anymore. */
+        RuntimeCodeInfoAccess.setAccountedSizes(codeInfo, Word.zero(), Word.zero(), Word.zero());
+    }
+
+    /**
+     * Updates the counters after the sizes of a code info that was already added have changed, i.e.,
+     * after the installation has set the final sizes and created the metadata arrays.
+     */
+    public void updateSizeCounters(CodeInfo info) {
+        assert info.isNonNull();
+        lock.lock();
+        try {
+            recountSizes(info);
+        } finally {
+            lock.unlock();
+        }
     }
 
     public SizeCounters getSizeCounters() {
@@ -253,7 +282,7 @@ public class RuntimeCodeInfoMemory {
 
     @Uninterruptible(reason = "Manipulate hashtable atomically with regard to GC.")
     private void add0(CodeInfo info) {
-        addToSizeCounters(info);
+        recountSizes(info);
         if (table.isNull()) {
             table = NonmovableArrays.createWordArray(32, NmtCategory.Code);
         }
