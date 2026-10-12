@@ -4074,6 +4074,17 @@ _renaissanceConfig = {
 }
 
 
+def extract_archive(path, extracted_name):
+    """Extracts the archive `path` to a sibling directory `extracted_name` (once) and returns that directory."""
+    extracted_archive = os.path.join(os.path.dirname(path), extracted_name)
+    if not os.path.exists(extracted_archive):
+        # There can be multiple processes doing this so be atomic about it
+        with mx.SafeDirectoryUpdater(extracted_archive, create=True) as sdu:
+            with zipfile.ZipFile(path, 'r') as zf:
+                zf.extractall(sdu.directory)
+    return extracted_archive
+
+
 class RenaissanceBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.AveragingBenchmarkMixin, mx_benchmark.TemporaryWorkdirMixin):
     """Renaissance benchmark suite implementation.
     """
@@ -4150,6 +4161,27 @@ class RenaissanceBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.Av
             return lib.get_path(True)
         return None
 
+    def renaissanceStandalone(self):
+        """
+        Whether to run the per-benchmark standalone jars (`single/<benchmark>.jar`) of the extracted Renaissance
+        archive instead of the fat jar. Enabled by RENAISSANCE_STANDALONE=1, the fat jar remains the default.
+        The standalone jars run the harness directly and avoid the launcher's module loader, which registers
+        a private `resource:` URL scheme that conflicts with Native Image based VMs such as Crema.
+        """
+        return mx.get_env('RENAISSANCE_STANDALONE') in ('1', 'true')
+
+    def renaissance_unpacked(self):
+        return extract_archive(self.renaissancePath(), 'renaissance.extracted')
+
+    def standalone_jar_path(self, benchmark_name):
+        standalone_jars_directory = "single"
+        return os.path.join(self.renaissance_unpacked(), standalone_jars_directory, f"{benchmark_name}.jar")
+
+    def renaissanceJarPath(self, benchmark_name):
+        if self.renaissanceStandalone():
+            return self.standalone_jar_path(benchmark_name)
+        return self.renaissancePath()
+
     def postprocessRunArgs(self, benchname, runArgs):
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument("-r", default=None)
@@ -4198,7 +4230,7 @@ class RenaissanceBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.Av
             vmArgs.append("-Xss1500K")
 
         runArgs = self.postprocessRunArgs(benchmarks[0], self.runArgs(bmSuiteArgs))
-        return (vmArgs + ["-jar", self.renaissancePath()] + runArgs + [benchArg])
+        return (vmArgs + ["-jar", self.renaissanceJarPath(benchmarks[0])] + runArgs + [benchArg])
 
     def benchmarkList(self, bmSuiteArgs):
         return [b for b, it in self.renaissanceIterations().items() if it != -1]
