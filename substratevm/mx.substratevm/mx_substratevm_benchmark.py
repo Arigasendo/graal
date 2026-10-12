@@ -26,7 +26,6 @@
 
 import os
 import tempfile
-import zipfile
 import re
 import json
 from glob import glob
@@ -38,20 +37,10 @@ import mx_benchmark
 import mx_sdk_benchmark
 from mx._impl.mx_benchmark import ConstantContextValueManager
 from mx_benchmark import bm_exec_context, SingleBenchmarkManager
-from mx_sdk_benchmark import SUCCESSFUL_STAGE_PATTERNS, parse_prefixed_args
+from mx_sdk_benchmark import SUCCESSFUL_STAGE_PATTERNS, extract_archive, parse_prefixed_args
 from mx_util import StageName, Layer
 
 _suite = mx.suite("substratevm")
-
-
-def extract_archive(path, extracted_name):
-    extracted_archive = os.path.join(os.path.dirname(path), extracted_name)
-    if not os.path.exists(extracted_archive):
-        # There can be multiple processes doing this so be atomic about it
-        with mx.SafeDirectoryUpdater(extracted_archive, create=True) as sdu:
-            with zipfile.ZipFile(path, 'r') as zf:
-                zf.extractall(sdu.directory)
-    return extracted_archive
 
 
 def list_jars(path):
@@ -183,13 +172,6 @@ class RenaissanceNativeImageBenchmarkSuite(mx_sdk_benchmark.RenaissanceBenchmark
             if lib:
                 return lib.get_path(True)
         return None
-
-    def renaissance_unpacked(self):
-        return extract_archive(self.renaissancePath(), 'renaissance.extracted')
-
-    def standalone_jar_path(self, benchmark_name):
-        standalone_jars_directory = "single"
-        return os.path.join(self.renaissance_unpacked(), standalone_jars_directory, f"{benchmark_name}.jar")
 
     def run(self, benchmarks, bmSuiteArgs) -> mx_benchmark.DataPoints:
         return self.intercept_run(super(), benchmarks, bmSuiteArgs)

@@ -2767,6 +2767,7 @@ lib_jvm_preserved_packages = [
     'jdk.jfr',
     'org.ietf.jgss',
     'sun.invoke.util',
+    'sun.misc',
     'sun.nio.cs.ext',
     'sun.security.util',
     'sun.util',
