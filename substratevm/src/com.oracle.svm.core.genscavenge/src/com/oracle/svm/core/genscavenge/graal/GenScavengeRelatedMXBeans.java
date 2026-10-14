@@ -25,7 +25,6 @@
 package com.oracle.svm.core.genscavenge.graal;
 
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 
 import org.graalvm.nativeimage.Platform;
@@ -58,7 +57,6 @@ public final class GenScavengeRelatedMXBeans extends GCRelatedMXBeans {
 
         beans.addSingleton(java.lang.management.MemoryMXBean.class, new HeapImplMemoryMXBean());
         beans.addList(java.lang.management.MemoryPoolMXBean.class, Arrays.asList(memoryPoolMXBeans.getMXBeans()));
-        beans.addList(java.lang.management.BufferPoolMXBean.class, Collections.emptyList());
         beans.addList(com.sun.management.GarbageCollectorMXBean.class, garbageCollectors);
     }
 }

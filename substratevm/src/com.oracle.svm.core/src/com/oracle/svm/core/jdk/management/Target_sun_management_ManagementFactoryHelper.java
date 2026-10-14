@@ -24,6 +24,7 @@
  */
 package com.oracle.svm.core.jdk.management;
 
+import java.lang.management.BufferPoolMXBean;
 import java.lang.management.ClassLoadingMXBean;
 import java.lang.management.CompilationMXBean;
 import java.lang.management.GarbageCollectorMXBean;
@@ -83,6 +84,11 @@ final class Target_sun_management_ManagementFactoryHelper {
     @Substitute
     private static List<MemoryPoolMXBean> getMemoryPoolMXBeans() {
         return ManagementSupport.getSingleton().getPlatformMXBeans(MemoryPoolMXBean.class);
+    }
+
+    @Substitute
+    private static List<BufferPoolMXBean> getBufferPoolMXBeans() {
+        return ManagementSupport.getSingleton().getPlatformMXBeans(BufferPoolMXBean.class);
     }
 
     @Substitute
