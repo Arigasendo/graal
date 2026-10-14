@@ -3,6 +3,7 @@
 This changelog summarizes major changes to GraalVM Native Image.
 
 ## GraalVM 25.5 (Internal Version 25.5.5)
+* (GR-79662) `ManagementFactory.getPlatformMXBeans(BufferPoolMXBean.class)` and the platform MBean server now provide the `direct`, `mapped` and `mapped - 'non-volatile memory'` buffer pools (`java.nio:type=BufferPool`). Previously the list was empty.
 * (GR-79971) Unrecognized Native Image options starting with `-` or `--` now produce an error instead of being interpreted as a main class or output filename.
   This also rejects positional output names beginning with a dash.
   To keep using such a name, specify it with `-o`, for example `native-image -jar hello.jar -o --my-image`, or prefix the positional name with `./`.

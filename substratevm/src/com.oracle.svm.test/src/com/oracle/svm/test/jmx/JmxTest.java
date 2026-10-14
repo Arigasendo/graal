@@ -32,6 +32,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeTrue;
 
 import java.io.IOException;
+import java.lang.management.BufferPoolMXBean;
 import java.lang.management.ClassLoadingMXBean;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
@@ -42,6 +43,8 @@ import java.lang.management.MemoryUsage;
 import java.lang.management.OperatingSystemMXBean;
 import java.lang.management.RuntimeMXBean;
 import java.lang.management.ThreadMXBean;
+import java.lang.ref.Reference;
+import java.nio.ByteBuffer;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -350,6 +353,41 @@ public class JmxTest {
         for (MemoryPoolMXBean memoryPoolMXBean : memoryPoolMXBeans) {
             assertNotNull("Memory Pool name should not be null ", memoryPoolMXBean.getName());
         }
+    }
+
+    @Test
+    public void testBufferPoolMXBeanDirect() {
+        List<BufferPoolMXBean> bufferPools = ManagementFactory.getPlatformMXBeans(BufferPoolMXBean.class);
+        BufferPoolMXBean direct = findBufferPool(bufferPools, "direct");
+        assertNotNull("The direct buffer pool should be registered. ", findBufferPool(bufferPools, "mapped"));
+
+        int size = 1024 * 1024;
+        ByteBuffer buffer = ByteBuffer.allocateDirect(size);
+        assertTrue("A live direct buffer should be counted. ", direct.getCount() >= 1);
+        assertTrue("A live direct buffer should be part of the capacity. ", direct.getTotalCapacity() >= size);
+        assertTrue("A live direct buffer should be part of the used memory. ", direct.getMemoryUsed() >= size);
+        Reference.reachabilityFence(buffer);
+    }
+
+    @Test
+    public void testBufferPoolMXBeanProxy() throws IOException {
+        // This test checks to make sure we are able to get the MXBean and do simple things with it.
+        MBeanServerConnection mbsc = getLocalMBeanServerConnectionStatic();
+        List<BufferPoolMXBean> bufferPools = ManagementFactory.getPlatformMXBeans(mbsc, BufferPoolMXBean.class);
+        BufferPoolMXBean direct = findBufferPool(bufferPools, "direct");
+        assertNotNull("The direct buffer pool should be registered. ", direct);
+        assertEquals("java.nio:type=BufferPool,name=direct", direct.getObjectName().toString());
+        assertTrue("Buffer count should not be negative. ", direct.getCount() >= 0);
+        assertTrue("Memory used should not be negative. ", direct.getMemoryUsed() >= 0);
+    }
+
+    private static BufferPoolMXBean findBufferPool(List<BufferPoolMXBean> bufferPools, String name) {
+        for (BufferPoolMXBean bufferPool : bufferPools) {
+            if (bufferPool.getName().equals(name)) {
+                return bufferPool;
+            }
+        }
+        return null;
     }
 
     @Test
