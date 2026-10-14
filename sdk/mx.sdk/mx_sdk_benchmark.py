@@ -2607,6 +2607,8 @@ class BaseDaCapoBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.Ave
         else:
             iterations = self.daCapoIterations()[benchname]
             if iterations == -1:
+                if _include_unsupported_benchmarks():
+                    mx.abort(f"DaCapo '{benchname}' has no default iteration count, pass one explicitly (for example '-n 2') when INCLUDE_UNSUPPORTED_BENCHMARKS is set")
                 return None
             else:
                 iterations = iterations + int(self.getExtraIterationCount(iterations) * args.sf)
@@ -2652,8 +2654,10 @@ class BaseDaCapoBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.Ave
         missing_sizes = set(self.daCapoIterations().keys()).difference(set(self.daCapoSizes().keys()))
         if len(missing_sizes) > 0:
             mx.abort(f"Missing size definitions for benchmark(s): {missing_sizes}")
+        if _include_unsupported_benchmarks():
+            mx.warn("INCLUDE_UNSUPPORTED_BENCHMARKS is set: listing DaCapo benchmarks that have no default iteration count")
         return [b for b, it in self.daCapoIterations().items()
-                if self.workloadSize() in self.daCapoSizes().get(b, []) and it != -1]
+                if self.workloadSize() in self.daCapoSizes().get(b, []) and (it != -1 or _include_unsupported_benchmarks())]
 
     def successPatterns(self):
         return [
@@ -2725,6 +2729,17 @@ class BaseDaCapoBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.Ave
         results = super().run(benchmarks, bmSuiteArgs)
         self.addAverageAcrossLatestResults(results)
         return results
+
+
+def _include_unsupported_benchmarks():
+    """
+    Opt-in (INCLUDE_UNSUPPORTED_BENCHMARKS=1) for running benchmarks that the suites exclude by default:
+    Renaissance benchmarks removed per version in ``renaissanceIterations`` and DaCapo benchmarks whose default
+    iteration count is -1. The exclusions were not written for Crema, so this allows checking whether they also fail
+    there. DaCapo benchmarks removed per JDK or version in ``daCapoIterations`` (batik, avrora, tradesoap and the
+    9.12-bach set) stay excluded. DaCapo benchmarks with a -1 count need an explicit iteration count (-n).
+    """
+    return mx.get_env('INCLUDE_UNSUPPORTED_BENCHMARKS') in ('1', 'true')
 
 
 _daCapoIterations = {
@@ -4074,6 +4089,17 @@ _renaissanceConfig = {
 }
 
 
+def extract_archive(path, extracted_name):
+    """Extracts the archive `path` to a sibling directory `extracted_name` (once) and returns that directory."""
+    extracted_archive = os.path.join(os.path.dirname(path), extracted_name)
+    if not os.path.exists(extracted_archive):
+        # There can be multiple processes doing this so be atomic about it
+        with mx.SafeDirectoryUpdater(extracted_archive, create=True) as sdu:
+            with zipfile.ZipFile(path, 'r') as zf:
+                zf.extractall(sdu.directory)
+    return extracted_archive
+
+
 class RenaissanceBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.AveragingBenchmarkMixin, mx_benchmark.TemporaryWorkdirMixin):
     """Renaissance benchmark suite implementation.
     """
@@ -4092,6 +4118,10 @@ class RenaissanceBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.Av
     def renaissanceIterations(self):
         benchmarks = _renaissanceConfig.copy()
         version = self.version()
+
+        if _include_unsupported_benchmarks():
+            mx.warn("INCLUDE_UNSUPPORTED_BENCHMARKS is set: not applying the per-version Renaissance exclusions")
+            return benchmarks
 
         if version in ["0.14.1"]:
             if mx.get_jdk().javaCompliance >= '21':
@@ -4150,6 +4180,27 @@ class RenaissanceBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.Av
             return lib.get_path(True)
         return None
 
+    def renaissanceStandalone(self):
+        """
+        Whether to run the per-benchmark standalone jars (`single/<benchmark>.jar`) of the extracted Renaissance
+        archive instead of the fat jar. Enabled by RENAISSANCE_STANDALONE=1, the fat jar remains the default.
+        The standalone jars run the harness directly and avoid the launcher's module loader, which registers
+        a private `resource:` URL scheme that conflicts with Native Image based VMs such as Crema.
+        """
+        return mx.get_env('RENAISSANCE_STANDALONE') in ('1', 'true')
+
+    def renaissance_unpacked(self):
+        return extract_archive(self.renaissancePath(), 'renaissance.extracted')
+
+    def standalone_jar_path(self, benchmark_name):
+        standalone_jars_directory = "single"
+        return os.path.join(self.renaissance_unpacked(), standalone_jars_directory, f"{benchmark_name}.jar")
+
+    def renaissanceJarPath(self, benchmark_name):
+        if self.renaissanceStandalone():
+            return self.standalone_jar_path(benchmark_name)
+        return self.renaissancePath()
+
     def postprocessRunArgs(self, benchname, runArgs):
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument("-r", default=None)
@@ -4198,10 +4249,10 @@ class RenaissanceBenchmarkSuite(mx_benchmark.JavaBenchmarkSuite, mx_benchmark.Av
             vmArgs.append("-Xss1500K")
 
         runArgs = self.postprocessRunArgs(benchmarks[0], self.runArgs(bmSuiteArgs))
-        return (vmArgs + ["-jar", self.renaissancePath()] + runArgs + [benchArg])
+        return (vmArgs + ["-jar", self.renaissanceJarPath(benchmarks[0])] + runArgs + [benchArg])
 
     def benchmarkList(self, bmSuiteArgs):
-        return [b for b, it in self.renaissanceIterations().items() if it != -1]
+        return [b for b, it in self.renaissanceIterations().items() if it != -1 or _include_unsupported_benchmarks()]
 
     def successPatterns(self):
         return []

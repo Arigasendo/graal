@@ -132,6 +132,8 @@ public final class ManagementSupport implements ThreadListener {
         mxBeans.addSingleton(java.lang.management.CompilationMXBean.class, compilationMXBean);
         mxBeans.addSingleton(java.lang.management.RuntimeMXBean.class, runtimeMXBean);
         mxBeans.addSingleton(com.sun.management.ThreadMXBean.class, threadMXBean);
+        /* The buffer pools do not depend on the GC, so they are not registered in the GC-related beans. */
+        mxBeans.addList(java.lang.management.BufferPoolMXBean.class, SubstrateBufferPoolMXBean.createAll());
 
         /* Register MXBean suppliers for beans that need a more complex logic. */
         mxBeans.addSingleton(getOsMXBeanInterface(), (PlatformManagedObjectSupplier) this::getOsMXBean);
