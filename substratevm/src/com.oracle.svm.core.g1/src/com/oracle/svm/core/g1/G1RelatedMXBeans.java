@@ -44,7 +44,6 @@ public final class G1RelatedMXBeans extends GCRelatedMXBeans {
         beans.addSingleton(java.lang.management.MemoryMXBean.class, new G1MemoryMXBean());
         /* GR-15504: the following MX beans are not yet implemented for G1. */
         beans.addList(java.lang.management.MemoryPoolMXBean.class, Collections.emptyList());
-        beans.addList(java.lang.management.BufferPoolMXBean.class, Collections.emptyList());
         beans.addList(com.sun.management.GarbageCollectorMXBean.class, Collections.emptyList());
     }
 }
