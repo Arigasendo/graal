@@ -431,7 +431,9 @@ public abstract class SystemPropertiesSupport implements RuntimeSystemProperties
         if (libDirectory == null) {
             throw VMError.shouldNotReachHere("Unable to determine sun.boot.library.path for " + objectFileStr);
         }
-        return libDirectory;
+        // lib/svm holds the shim libjava.so, which must win over the JDK's lib/libjava.so
+        char listSeparator = pathSeparator() == '\\' ? ';' : ':'; // java.io.File is not usable here
+        return svmDirectory + listSeparator + libDirectory;
     }
 
     protected String jvmLibName() {
