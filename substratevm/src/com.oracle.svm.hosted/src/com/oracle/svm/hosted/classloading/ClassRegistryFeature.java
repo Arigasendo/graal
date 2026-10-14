@@ -35,10 +35,13 @@ import com.oracle.svm.core.hub.RuntimeClassLoading;
 import com.oracle.svm.core.hub.registry.ClassRegistries;
 import com.oracle.svm.hosted.ClassLoaderFeature;
 import com.oracle.svm.hosted.FeatureImpl;
+import com.oracle.svm.hosted.ImageClassLoader;
 import com.oracle.svm.hosted.classinitialization.ClassInitializationSupport;
 
 @AutomaticallyRegisteredFeature
 public class ClassRegistryFeature implements InternalFeature {
+
+    private ImageClassLoader imageClassLoader;
 
     @Override
     public List<Class<? extends Feature>> getRequiredFeatures() {
@@ -55,15 +58,17 @@ public class ClassRegistryFeature implements InternalFeature {
     @Override
     public void beforeAnalysis(BeforeAnalysisAccess a) {
         FeatureImpl.BeforeAnalysisAccessImpl access = (FeatureImpl.BeforeAnalysisAccessImpl) a;
+        imageClassLoader = access.getImageClassLoader();
         access.registerSubtypeReachabilityHandler((_, cls) -> onTypeReachable(cls), Object.class);
     }
 
-    private static void onTypeReachable(Class<?> cls) {
+    private void onTypeReachable(Class<?> cls) {
         if (cls.isArray() || cls.isHidden()) {
             return;
         }
         if (RuntimeClassLoading.isSupported()) {
-            ClassRegistries.addAOTClass(ClassLoaderFeature.getRuntimeClassLoader(cls.getClassLoader()), cls);
+            ClassLoader loader = imageClassLoader.isCoreType(cls) ? null : ClassLoaderFeature.getRuntimeClassLoader(cls.getClassLoader());
+            ClassRegistries.addAOTClass(loader, cls);
         }
     }
 }
