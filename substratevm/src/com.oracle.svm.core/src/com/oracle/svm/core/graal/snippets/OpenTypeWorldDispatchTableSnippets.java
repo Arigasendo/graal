@@ -115,6 +115,16 @@ public final class OpenTypeWorldDispatchTableSnippets extends SubstrateTemplates
         throw UnreachableNode.unreachable();
     }
 
+    // EXPERIMENT: deliberately not @Fold. A folded version crashed at startup, probably because KnownOffsets is only initialized after
+    // the snippet graphs are prepared. Passing the values as snippet constant parameters would be cleaner.
+    static int experimentVTableBaseOffset() {
+        return KnownOffsets.singleton().getVTableBaseOffset();
+    }
+
+    static int experimentVTableEntrySize() {
+        return KnownOffsets.singleton().getVTableEntrySize();
+    }
+
     /**
      * If {@link SubstrateOptions#useInterfaceHashing()} is enabled, interfaceIDs and itable
      * starting offsets are stored in a hash table (see TypeCheckBuilder for a general
@@ -142,7 +152,7 @@ public final class OpenTypeWorldDispatchTableSnippets extends SubstrateTemplates
         // Hashtable entries contain integers which hold the iTableOffset and the interfaceID:
         // hashTableEntry = iTableOffset << HASHING_ITABLE_SHIFT | interfaceID
         ReplacementsUtil.dynamicAssert(interfaceID == (hashTableEntry & HASHING_INTERFACE_MASK), "InterfaceIDs do not match.");
-        return (hashTableEntry >>> HASHING_ITABLE_SHIFT);
+        return experimentVTableBaseOffset() + (hashTableEntry >>> HASHING_ITABLE_SHIFT) * experimentVTableEntrySize();
     }
 
     public static long determineITableStartingOffset(
@@ -181,7 +191,7 @@ public final class OpenTypeWorldDispatchTableSnippets extends SubstrateTemplates
         // Hashtable entries contain integers which hold the iTableOffset and the interfaceID:
         // hashTableEntry = iTableOffset << HASHING_ITABLE_SHIFT | interfaceID
         assert interfaceID == (hashTableEntry & HASHING_INTERFACE_MASK) : "InterfaceIDs do not match.";
-        return (hashTableEntry >>> HASHING_ITABLE_SHIFT);
+        return experimentVTableBaseOffset() + (hashTableEntry >>> HASHING_ITABLE_SHIFT) * experimentVTableEntrySize();
     }
 
     private final SnippetTemplate.SnippetInfo loadITableStartingOffset;

@@ -151,9 +151,11 @@ public final class DynamicHubUtils {
         for (int interfaceIdx = 0; interfaceIdx < interfaceIDs.length; interfaceIdx++) {
             int interfaceID = interfaceIDs[interfaceIdx];
             if (useInterfaceHashing && interfaceID <= SubstrateOptions.interfaceHashingMaxId()) {
-                int offset = implementsMethods ? Math.toIntExact(vTableBaseOffset + iTableStartingOffsets[interfaceIdx] * vTableEntrySize) : Short.MIN_VALUE;
-                GraalError.guarantee(NumUtil.isShort(offset), "ItableDynamicHubOffset cannot be encoded as a short. Try -H:-UseInterfaceHashing.");
-                hashTable[DynamicHubUtils.hash(interfaceID, hashParam)] = ((offset << HASHING_ITABLE_SHIFT) | interfaceID);
+                // EXPERIMENT (not reviewed): the entry stores the itable index in slots (unsigned 16 bit) instead of the byte offset.
+                // The lookups decode vtableBase + index * entrySize.
+                int index = implementsMethods ? iTableStartingOffsets[interfaceIdx] : 0;
+                GraalError.guarantee(NumUtil.isUShort(index), "ItableDynamicHubIndex cannot be encoded as an unsigned short.");
+                hashTable[DynamicHubUtils.hash(interfaceID, hashParam)] = ((index << HASHING_ITABLE_SHIFT) | interfaceID);
             } else {
                 int offset = implementsMethods ? Math.toIntExact(vTableBaseOffset + iTableStartingOffsets[interfaceIdx] * vTableEntrySize) : 0xBADD0D1D;
                 openTypeWorldTypeCheckSlots[iterableInterfaceIdx * 2 + numClassTypes] = interfaceID;

@@ -155,7 +155,7 @@ public abstract class InterpreterStubSection {
      * On AMD64, the 16-byte trampoline, 4,094 16-byte stubs, and the 13-byte .fini section
      * fit in one 64-KiB interval. One more stub would move .fini into the next interval.
      */
-    static final int MAX_VTABLE_STUBS = 4 * 1024 - 2;
+    static final int MAX_VTABLE_STUBS = 8 * 1024 - 2; // EXPERIMENT: was 4 * 1024 - 2, see the comment above (not checked whether the 64-KiB interval is a hard requirement)
 
     protected final SubstrateTarget target;
     protected final RegisterConfig registerConfig;
